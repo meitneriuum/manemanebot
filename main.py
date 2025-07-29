@@ -33,7 +33,7 @@ ALL_FILES = {
     BALANCES_FILE: ["chat_id", "account_id", "balance", "currency", "date"],
     ACCOUNTS_FILE: ["account_id", "chat_id", "account_name", "account_type", "currency"]
 }
-CATEGORIES = ["Salary", "Groceries", "Entertainment", "Shopping", "Activities"]
+CATEGORIES = ["зпка", "продукты", "активности", "транспорт", "кафе/рестораны", "депы", "додепы", "покупки", "сервисы"]
 
 # States for ConversationHandler
 ACCOUNT_NAME, ACCOUNT_TYPE, CURRENCY, INITIAL_BALANCE = range(4)
@@ -455,6 +455,9 @@ async def show_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_text(response)
 
+# Error handler
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.error(f"Update {update} caused error {context.error}")
 
 def main() -> None:
     init_csvs()
@@ -494,7 +497,7 @@ def main() -> None:
     application.add_handler(transaction_handler)
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("balance", show_balance))
-    # application.add_handler(CommandHandler("analytics", show_analytics))
+    application.add_error_handler(error_handler)
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
