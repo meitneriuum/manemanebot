@@ -279,8 +279,8 @@ async def handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         # Create dynamic keyboard for categories (max 2 per row)
         keyboard = []
         current_row = []
-        for idx, category in enumerate(CATEGORIES, 1):
-            button = InlineKeyboardButton(category, callback_data=str(idx))
+        for category in CATEGORIES:
+            button = InlineKeyboardButton(category, callback_data=category)
             current_row.append(button)
             if len(current_row) == 2:
                 keyboard.append(current_row)
