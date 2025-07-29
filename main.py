@@ -24,22 +24,22 @@ data_folder = "data"
 USERS_FILE = "users.csv"
 TRANSACTIONS_FILE = "transactions.csv"
 BALANCES_FILE = "balances.csv"
-CATEGORIES_FILE = "categories.csv"
 ACCOUNTS_FILE = "accounts.csv"
 
 ALL_FILES = {
     USERS_FILE: ["chat_id", "username"],
     TRANSACTIONS_FILE: [
         "transaction_id", "chat_id", "timestamp", "amount", "account_id",
-        "category_id", "description", "transaction_type", "tags"
+        "category", "description", "transaction_type", "tags"
     ],
     BALANCES_FILE: ["chat_id", "account_id", "balance", "currency", "date"],
-    CATEGORIES_FILE: ["category_id", "category_name"],
     ACCOUNTS_FILE: ["account_id", "chat_id", "account_name", "account_type", "currency"]
 }
+CATEGORIES = ["Salary", "Groceries", "Entertainment", "Shopping", "Activities"]
 
 # States for ConversationHandler
 ACCOUNT_NAME, ACCOUNT_TYPE, CURRENCY, INITIAL_BALANCE = range(4)
+ACCOUNT_SELECTION, TRANSACTION_AMOUNT, CATEGORY, DESCRIPTION = range(4)
 
 def get_file_path(filename: str) -> str:
     return os.path.join(data_folder, filename)
@@ -70,15 +70,14 @@ def append_file(filename, **kwargs):
 
 def add_user(chat_id, username):
     users_df = read_file(USERS_FILE)
-    if not users_df["chat_id"].isin([chat_id]).any():
+    if not users_df["chat_id"].isin([int(chat_id)]).any():
         append_file(USERS_FILE, chat_id=chat_id, username=username)
         logger.info(f"Added user {username} with chat_id {chat_id}")
     else:
         logger.info("User already exists.")
 
-def check_if_user_has_an_account(chat_id):
-    accounts_df = read_file(ACCOUNTS_FILE)
-    user_accounts = accounts_df[accounts_df["chat_id"] == chat_id]
+def check_if_user_has_an_account(accounts_df, chat_id):
+    user_accounts = accounts_df[accounts_df["chat_id"] == int(chat_id)]
     return not user_accounts.empty
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -149,13 +148,19 @@ async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     selected_currency = query.data
     context.user_data['currency'] = selected_currency
 
-    await update.message.reply_text("Please enter the initial balance for your account:")
+    await update.callback_query.message.reply_text("Please enter the initial balance for your account:")
     return INITIAL_BALANCE
 
 async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = str(update.effective_chat.id)
     initial_balance_input = update.message.text.strip()
-    if not initial_balance_input or not initial_balance_input.isdigit():
+    if not initial_balance_input:
+        await update.message.reply_text("Initial balance must be numeric. Please enter a valid value:")
+        return INITIAL_BALANCE
+
+    try:
+        initial_balance_input = float(initial_balance_input)
+    except ValueError:
         await update.message.reply_text("Initial balance must be numeric. Please enter a valid value:")
         return INITIAL_BALANCE
 
@@ -186,7 +191,7 @@ async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             BALANCES_FILE,
             chat_id=chat_id,
             account_id=account_id,
-            balance=float(initial_balance_input),
+            balance=initial_balance_input,
             currency=selected_currency,
             date=datetime.now(timezone('UTC')).isoformat()
         )
@@ -205,15 +210,198 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     return ConversationHandler.END
 
-async def start_add_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+def get_account_mappings(chat_id: str) -> dict:
+    accounts_df = read_file(ACCOUNTS_FILE)
+    has_account = check_if_user_has_an_account(accounts_df, chat_id)
+    if not has_account:
+        return {}
+    mappings = {
+        row['account_id']: {
+            'account_name': row['account_name'],
+            'account_type': row['account_type'],
+            'currency': row['currency']
+        }
+        for _, row in accounts_df[accounts_df["chat_id"] == int(chat_id)].iterrows()
+    }
+    return mappings
+
+async def start_add_transaction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = str(update.effective_chat.id)
-    has_account = check_if_user_has_an_account(chat_id)
+    accounts_df = read_file(ACCOUNTS_FILE)
+    has_account = check_if_user_has_an_account(accounts_df, chat_id)
+    message = update.message or update.edited_message
     if not has_account:
-        message = update.message or update.edited_message
         await message.reply_text("You don't have an account yet. Please use /create_account to add a new banking account.")
+        return ConversationHandler.END
+
+    account_mappings = get_account_mappings(chat_id)
+    if not account_mappings:
+        await update.message.reply_text("You don't have an account yet. Please use /create_account to add a new banking account.")
+        return ConversationHandler.END
+
+    keyboard = []
+    current_row = []
+    for account_id, info in account_mappings.items():
+        button_text = f"{info['account_name']} ({info['currency']})"
+        button = InlineKeyboardButton(button_text, callback_data=str(account_id))
+        current_row.append(button)
+        if len(current_row) == 2:
+            keyboard.append(current_row)
+            current_row = []
+    if current_row:
+        keyboard.append(current_row)
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Select an account:", reply_markup=reply_markup)
+    return ACCOUNT_SELECTION
+
+async def handle_account_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    account_id = query.data
+    context.user_data['account_id'] = account_id
+
+    # Retrieve account details
+    chat_id = str(update.effective_chat.id)
+    account_mappings = get_account_mappings(chat_id)
+    account_info = account_mappings.get(int(account_id), {})
+
+    await query.message.reply_text(
+        f"Selected account: {account_info['account_name']} ({account_info['currency']})\n"
+        f"Please enter the transaction amount (e.g., 50.25 or -50.25):"
+    )
+    return TRANSACTION_AMOUNT
+
+
+async def handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    amount_text = update.message.text.strip()
+    try:
+        amount = float(amount_text)
+        context.user_data['transaction_amount'] = amount
+
+        # Create dynamic keyboard for categories (max 2 per row)
+        keyboard = []
+        current_row = []
+        for idx, category in enumerate(CATEGORIES, 1):
+            button = InlineKeyboardButton(category, callback_data=str(idx))
+            current_row.append(button)
+            if len(current_row) == 2:
+                keyboard.append(current_row)
+                current_row = []
+        if current_row:
+            keyboard.append(current_row)
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("Select a category:", reply_markup=reply_markup)
+        return CATEGORY
+    except ValueError:
+        await update.message.reply_text("Invalid amount. Please enter a numeric value (e.g., 50.25 or -50.25):")
+        return TRANSACTION_AMOUNT
+
+
+async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data['category'] = query.data
+
+    await query.message.reply_text("Please enter a description for the transaction (or type 'none' to skip):")
+    return DESCRIPTION
+
+
+def update_balance(chat_id: str, account_id: int, amount: float, acc_currency: str):
+    """
+    Update balance in balances.csv for the given chat_id and account_id.
+    Uses the latest balance entry for the account and adds the transaction amount.
+    Appends a new balance entry without erasing existing data.
+
+    Args:
+        chat_id (str): The chat_id of the user.
+        account_id (int): The account_id to update.
+        amount (float): The transaction amount (positive for income, negative for expense).
+        acc_currency (str): The currency of the account.
+    """
+    balances_df = read_file(BALANCES_FILE)
+
+    # Find the latest balance entry for the chat_id and account_id
+    if not balances_df.empty:
+        existing_balances = balances_df[
+            (balances_df['chat_id'] == int(chat_id)) &
+            (balances_df['account_id'] == int(account_id))
+            ]
+        if not existing_balances.empty:
+            # Select the latest entry based on full timestamp
+            latest_balance = existing_balances.sort_values(by='date', ascending=False).iloc[0]
+            current_balance = latest_balance['balance']
+            new_balance = current_balance + amount
+        else:
+            # No prior balance for this account; start with the transaction amount
+            new_balance = amount
     else:
-        pass  # Implement transaction logic later
+        # No balances in the file; start with the transaction amount
+        new_balance = amount
+
+    # Append new balance entry
+    try:
+        append_file(
+            BALANCES_FILE,
+            chat_id=chat_id,
+            account_id=account_id,
+            balance=new_balance,
+            currency=acc_currency,
+            date=datetime.now(timezone('UTC')).isoformat()
+        )
+    except Exception as e:
+        logger.error(f"Error appending balance for chat_id {chat_id}, account_id {account_id}: {str(e)}")
+        raise
+    return new_balance
+
+
+async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    description = update.message.text.strip()
+    if description.lower() == 'none':
+        description = ""
+    context.user_data['description'] = description
+
+    # Retrieve transaction details
+    chat_id = str(update.effective_chat.id)
+    account_id = context.user_data['account_id']
+    amount = context.user_data['transaction_amount']
+    category = context.user_data['category']
+    account_mappings = get_account_mappings(chat_id)
+    account_info = account_mappings.get(int(account_id), {})
+
+    # Save transaction to transactions.csv
+    transactions_df = read_file(TRANSACTIONS_FILE)
+    transaction_id = transactions_df['transaction_id'].max() + 1 if not transactions_df.empty else 1
+    try:
+        append_file(
+            TRANSACTIONS_FILE,
+            transaction_id=transaction_id,
+            chat_id=chat_id,
+            timestamp=datetime.now(timezone('UTC')).isoformat(),
+            amount=amount,
+            account_id=int(account_id),
+            category=category,
+            description=description,
+            transaction_type="income" if amount > 0 else "expense",
+            tags=""
+        )
+        # Update balance
+        new_balance = update_balance(chat_id, int(account_id), amount, account_info['currency'])
+
+        await update.message.reply_text(
+            f"Transaction recorded successfully:\n"
+            f"Account: {account_info['account_name']} ({account_info['currency']})\n"
+            f"Current balance: {new_balance}\n"
+        )
+    except Exception as e:
+        logger.error(f"Error saving transaction for chat_id {chat_id}: {str(e)}")
+        await update.message.reply_text("An error occurred while saving the transaction. Please try again.")
+        return ConversationHandler.END
+
+    context.user_data.clear()
+    return ConversationHandler.END
 
 async def show_analytics(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
@@ -242,14 +430,24 @@ def main() -> None:
         fallbacks=[CommandHandler("cancel", cancel)],
     )
 
+    transaction_handler = ConversationHandler(
+        entry_points=[CommandHandler("add_transaction", start_add_transaction)],
+        states={
+            ACCOUNT_SELECTION: [CallbackQueryHandler(handle_account_selection)],
+            TRANSACTION_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_amount)],
+            CATEGORY: [CallbackQueryHandler(handle_category)],
+            DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_description)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
 
     # Add handlers
     application.add_handler(account_creation_handler)
+    application.add_handler(transaction_handler)
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("add_transaction", start_add_transaction))
     application.add_handler(CommandHandler("analytics", show_analytics))
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES, poll_interval=10)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     main()
