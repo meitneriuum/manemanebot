@@ -91,9 +91,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             logger.error(f"No valid message in start command for chat {chat_id}")
             return
         await message.reply_html(
-            rf"Hi {user.mention_html()}! Use /create_account to add a new banking account. "
-            r"Use /add_transaction to add a new transaction. "
-            r"Use /analytics to see your balance and spending trends over time."
+            rf"Приветик {user.mention_html()}! Жмай /create_account чтобы создать новый счёт (это обязательно). "
+            r"Жмай /add_transaction чтобы добавить транзакцию. "
+            r"Жмай /analytics чтобы посмотреть аналитику своих расходов и накоплений (в разработке)."
         )
     except Exception as e:
         logger.error(f"Error in start command: {str(e)}")
@@ -101,7 +101,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def start_create_account(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the create_account conversation."""
     chat_id = str(update.effective_chat.id)
-    await update.message.reply_text("Please enter the name for your new account:")
+    await update.message.reply_text("Придумай имя для своего нового счёта:")
     return ACCOUNT_NAME
 
 async def account_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -109,18 +109,18 @@ async def account_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     chat_id = str(update.effective_chat.id)
     account_name_input = update.message.text.strip()
     if not account_name_input:
-        await update.message.reply_text("Account name cannot be empty. Please enter a valid name:")
+        await update.message.reply_text("Имя счёта не может быть пустым. Подумай получше:")
         return ACCOUNT_NAME
     context.user_data['account_name'] = account_name_input
 
     # Prompt for account type
     keyboard = [
-        [InlineKeyboardButton("Usual", callback_data='usual'),
-         InlineKeyboardButton("Savings", callback_data='savings'),
-         InlineKeyboardButton("Credit", callback_data='credit')]
+        [InlineKeyboardButton("Обычный", callback_data='usual'),
+         InlineKeyboardButton("Сберегательный", callback_data='savings'),
+         InlineKeyboardButton("Кредитный", callback_data='credit')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Choose the account type:", reply_markup=reply_markup)
+    await update.message.reply_text("Выбери тип счёта:", reply_markup=reply_markup)
     return ACCOUNT_TYPE
 
 async def account_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -137,7 +137,7 @@ async def account_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
          InlineKeyboardButton("EUR", callback_data='EUR')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await query.message.reply_text("Choose the currency:", reply_markup=reply_markup)
+    await query.message.reply_text("Выбери валюту:", reply_markup=reply_markup)
     return CURRENCY
 
 async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -148,20 +148,20 @@ async def currency(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     selected_currency = query.data
     context.user_data['currency'] = selected_currency
 
-    await update.callback_query.message.reply_text("Please enter the initial balance for your account:")
+    await update.callback_query.message.reply_text("Введи начальный баланс счёта:")
     return INITIAL_BALANCE
 
 async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     chat_id = str(update.effective_chat.id)
     initial_balance_input = update.message.text.strip()
     if not initial_balance_input:
-        await update.message.reply_text("Initial balance must be numeric. Please enter a valid value:")
+        await update.message.reply_text("Введи правильный баланс, он должен быть из цифр:")
         return INITIAL_BALANCE
 
     try:
         initial_balance_input = float(initial_balance_input)
     except ValueError:
-        await update.message.reply_text("Initial balance must be numeric. Please enter a valid value:")
+        await update.message.reply_text("Введи правильный баланс, он должен быть из цифр:")
         return INITIAL_BALANCE
 
     acc_name = context.user_data['account_name']
@@ -183,8 +183,7 @@ async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             currency=selected_currency
         )
         await update.message.reply_text(
-            f"Account created successfully!\n"
-            f"Name: {acc_name}\nType: {selected_account_type}\nCurrency: {selected_currency}"
+            f"Счёт `{acc_name}` успешно создан! \U0001F498"
         )
         # Initialize balance for the new account
         append_file(
@@ -197,7 +196,7 @@ async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
     except Exception as e:
         logger.error(f"Error saving account for chat_id {chat_id}: {str(e)}")
-        await update.message.reply_text("An error occurred while creating the account. Please try again.")
+        await update.message.reply_text("Не получилось :(")
         return ConversationHandler.END
 
     # Clear user_data
@@ -206,7 +205,7 @@ async def initial_balance(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the conversation."""
-    await update.message.reply_text("Operation cancelled.")
+    await update.message.reply_text("Галя, отмена \U0001F628")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -232,12 +231,12 @@ async def start_add_transaction(update: Update, context: ContextTypes.DEFAULT_TY
     has_account = check_if_user_has_an_account(accounts_df, chat_id)
     message = update.message or update.edited_message
     if not has_account:
-        await message.reply_text("You don't have an account yet. Please use /create_account to add a new banking account.")
+        await message.reply_text("У тебя пока нет ни одного счёта. :( Жмай /create_account !")
         return ConversationHandler.END
 
     account_mappings = get_account_mappings(chat_id)
     if not account_mappings:
-        await update.message.reply_text("You don't have an account yet. Please use /create_account to add a new banking account.")
+        await update.message.reply_text("У тебя пока нет ни одного счёта. :( Жмай /create_account !")
         return ConversationHandler.END
 
     keyboard = []
@@ -253,7 +252,7 @@ async def start_add_transaction(update: Update, context: ContextTypes.DEFAULT_TY
         keyboard.append(current_row)
 
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Select an account:", reply_markup=reply_markup)
+    await update.message.reply_text("Выбери нужный счёт:", reply_markup=reply_markup)
     return ACCOUNT_SELECTION
 
 async def handle_account_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -268,8 +267,7 @@ async def handle_account_selection(update: Update, context: ContextTypes.DEFAULT
     account_info = account_mappings.get(int(account_id), {})
 
     await query.message.reply_text(
-        f"Selected account: {account_info['account_name']} ({account_info['currency']})\n"
-        f"Please enter the transaction amount (e.g., 50.25 or -50.25):"
+        f"Введи сумму транзакции (e.g., 50.25 or -50.25):"
     )
     return TRANSACTION_AMOUNT
 
@@ -293,10 +291,10 @@ async def handle_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
             keyboard.append(current_row)
 
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Select a category:", reply_markup=reply_markup)
+        await update.message.reply_text("Выбери что больше подходит:", reply_markup=reply_markup)
         return CATEGORY
     except ValueError:
-        await update.message.reply_text("Invalid amount. Please enter a numeric value (e.g., 50.25 or -50.25):")
+        await update.message.reply_text("Сумма транзакции должна быть цифровой:")
         return TRANSACTION_AMOUNT
 
 
@@ -305,7 +303,7 @@ async def handle_category(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.answer()
     context.user_data['category'] = query.data
 
-    await query.message.reply_text("Please enter a description for the transaction (or type 'none' to skip):")
+    await query.message.reply_text("Введи описание транзакции, или 'none':")
     return DESCRIPTION
 
 
@@ -391,13 +389,11 @@ async def handle_description(update: Update, context: ContextTypes.DEFAULT_TYPE)
         new_balance = update_balance(chat_id, int(account_id), amount, account_info['currency'])
 
         await update.message.reply_text(
-            f"Transaction recorded successfully:\n"
-            f"Account: {account_info['account_name']} ({account_info['currency']})\n"
-            f"Current balance: {new_balance}\n"
+            f"Теперь на твоем счету `{account_info['account_name']}` целых {new_balance} {account_info['currency']}! \U0001F970"
         )
     except Exception as e:
         logger.error(f"Error saving transaction for chat_id {chat_id}: {str(e)}")
-        await update.message.reply_text("An error occurred while saving the transaction. Please try again.")
+        await update.message.reply_text("Что-то не вышло. :(")
         return ConversationHandler.END
 
     context.user_data.clear()
