@@ -1,9 +1,7 @@
 import os
 import logging
 import pandas as pd
-import matplotlib.pyplot as plt
-from datetime import datetime, time, timedelta
-from io import BytesIO
+from datetime import datetime
 from dotenv import load_dotenv
 from pytz import timezone
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
